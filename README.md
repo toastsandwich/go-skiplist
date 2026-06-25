@@ -1,4 +1,4 @@
-# go-skip-list
+# go-skiplist
 
 A clean, efficient [skip list](https://en.wikipedia.org/wiki/Skip_list) implementation in Go.
 
