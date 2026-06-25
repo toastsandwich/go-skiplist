@@ -198,7 +198,7 @@ go test -bench=. -benchmem -count=3 -benchtime=2s
 
 ## License
 
-This project is available under the terms of your choice (no license file included yet).
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ---
 
