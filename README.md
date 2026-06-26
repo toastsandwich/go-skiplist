@@ -1,205 +1,72 @@
 # go-skiplist
 
-A clean, efficient [skip list](https://en.wikipedia.org/wiki/Skip_list) implementation in Go.
+Simple skip list for Go.
 
-This package provides a probabilistic sorted key-value store with **expected O(log n)** performance for search, insertion, and deletion.
+Sorted `[]byte` key/value store with expected O(log n) operations.
 
-## Features
-
-- Keys and values are `[]byte`
-- Keys are maintained in sorted order (`bytes.Compare`)
-- `Push` acts as upsert (insert or update)
-- Zero-allocation `Get` in the common case
-- Iterator support via `iter.Seq2` (`All()`)
-- Configurable max level and promotion probability
-
-## Installation
+## Install
 
 ```bash
 go get github.com/toastsandwich/skiplist
 ```
 
-## Quick Start
+## Usage
 
 ```go
-package main
+import "github.com/toastsandwich/skiplist"
 
-import (
-	"fmt"
-	"github.com/toastsandwich/skiplist"
-)
+s := skiplist.NewSkipList(32, 0.5)
 
-func main() {
-	s := skiplist.NewSkipList(32, 0.5)
+s.Put([]byte("user:1"), []byte("Alice"))
+val, _ := s.Get([]byte("user:1"))
 
-	s.Push([]byte("user:1001"), []byte("Alice"))
-	s.Push([]byte("user:1002"), []byte("Bob"))
-	s.Push([]byte("user:1001"), []byte("Alice Smith")) // update
-
-	fmt.Println(string(s.Get([]byte("user:1001")))) // Alice Smith
-
-	for k, v := range s.All() {
-		fmt.Printf("%s => %s\n", k, v)
-	}
-
-	s.Pop([]byte("user:1002"))
+for k, v := range s.All() {
+	// sorted order
 }
-```
 
-## Documentation
-
-Run `go doc` or visit the generated documentation:
-
-```bash
-go doc github.com/toastsandwich/skiplist
-# or
-go doc -all .
+s.Pop([]byte("user:1"))
 ```
 
 ## How Skip Lists Work
 
-A skip list is a layered linked list that allows fast search by "skipping" over many elements.
-
-### Structure
+A skip list is a sorted linked list with extra "express lane" layers on top.
 
 ```
-Level 3:  HEAD -----------------------------------------------> NIL
-Level 2:  HEAD --------------------> [30] --------------------> NIL
-Level 1:  HEAD --> [10] -----------> [30] -----------> [50] --> NIL
-Level 0:  HEAD --> [10] --> [20] --> [30] --> [40] --> [50] --> NIL
+Level 2: HEAD ----------------------> [50] ------------> NIL
+Level 1: HEAD ----------> [20] --> [50] --> [80] --> NIL
+Level 0: HEAD --> [10] --> [20] --> [50] --> [80] --> NIL
 ```
 
-- Every element lives on **level 0**.
-- When inserting, we randomly decide how many levels the element should occupy.
-- Higher levels contain fewer elements → they act as "express lanes".
-- Search starts at the highest level and moves right, then drops down levels as needed.
+- Every element lives on level 0.
+- On insert, a node is randomly assigned a height. With the default p=0.5:
+  - ~50% stay at level 0
+  - ~25% reach level 1
+  - ~12.5% reach level 2, and so on
+- Search starts at the highest level, skips forward while keys are smaller, then drops down levels.
+- Higher levels act as shortcuts, giving expected **O(log n)** performance for put, get, and delete.
 
-### Insertion Height
+## Benchmarks (heavy load)
 
-The height of a new node is chosen using a geometric distribution:
-
-```go
-for l < maxLevel-1 && rand.Float64() < p {
-    l++
-}
-```
-
-With the default `p = 0.5`, roughly:
-
-- 50% of nodes appear only on level 0
-- 25% reach level 1
-- 12.5% reach level 2
-- ...and so on
-
-This gives expected **O(log n)** search time with high probability.
-
-### Search Walk
-
-To find a key:
-
-1. Start at the top level from the header.
-2. Move right while the next key is **less than** the search key.
-3. When you can't move right, drop one level.
-4. Repeat until level 0.
-5. Check if the node at level 0 matches.
-
-### Why `[]byte`?
-
-Using byte slices makes the structure very flexible (you can encode strings, integers, composite keys, etc.). Ordering is defined by Go's `bytes.Compare`.
-
-## API
-
-```go
-func NewSkipList(maxlevel int, p float64) *SkipList
-
-func (s *SkipList) Push(key, val []byte)
-func (s *SkipList) Get(key []byte) []byte
-func (s *SkipList) Pop(key []byte) []byte
-func (s *SkipList) All() iter.Seq2[[]byte, []byte]
-```
-
-### NewSkipList
-
-- `maxlevel`: maximum height of the skip list (defaults to 32 if ≤ 0)
-- `p`: promotion probability (defaults to 0.5 if ≤ 0)
-
-Recommended call:
-
-```go
-s := skiplist.NewSkipList(32, 0.5)
-```
-
-### Push / Get / Pop
-
-- `Push` inserts or updates a key.
-- `Get` returns `nil` for missing keys.
-- `Pop` removes a key and returns its old value (or `nil`).
-
-### Iteration
-
-```go
-for key, value := range s.All() {
-    // keys are yielded in ascending order
-}
-```
-
-The iterator reflects the state at the time of iteration. Modifying the list during iteration is not safe.
-
-## Examples
-
-### Basic Operations
-
-```go
-s := skiplist.NewSkipList(16, 0.5)
-
-s.Push([]byte("a"), []byte("1"))
-s.Push([]byte("b"), []byte("2"))
-s.Push([]byte("a"), []byte("updated"))   // overwrite
-
-v := s.Get([]byte("a"))                   // []byte("updated")
-old := s.Pop([]byte("b"))                 // []byte("2")
-```
-
-## Benchmarks
-
-Benchmarks were run on:
-
-- CPU: Intel Core i7-11800H (2.3 GHz)
-- OS: Linux
-- Go: 1.26.4
+Run on ~1 million elements (Intel Core i7-11800H):
 
 ```bash
-go test -bench=. -benchmem -count=3 -benchtime=2s
+go test -run=^$ -bench=. -benchmem -count=3 -benchtime=1s
 ```
 
-### Results
+| Op            | ns/op  | allocs/op |
+|---------------|--------|-----------|
+| Put           | 268    | 3         |
+| Get           | 244    | 0         |
+| Pop           | 572    | 4         |
+| PutGetMix     | 619    | 3         |
+| Iteration     | 6.3ms  | 0         |
 
-| Benchmark                  | ns/op    | B/op | allocs/op | Notes                               |
-|---------------------------|----------|------|-----------|-------------------------------------|
-| `Push`                    | 450      | 608  | 3         | Insert new key                      |
-| `Get`                     | 181      | 0    | 0         | Zero-allocation read path           |
-| `Pop` (+ reinsert)        | 688      | 864  | 4         | Steady-state delete + restore       |
-| `Iteration` (10k elems)   | ~89 000  | 0    | 0         | Full scan via `All()` (~89 µs)      |
-| `PushGetMix`              | 790      | 648  | 5         | Combined insert + lookup workload   |
+- `Get`, `Pop`, and `PutGetMix` run against a preloaded list of 1M elements.
+- `Iteration` = one full traversal over 500k elements.
+- `Pop` benchmark does pop + re-insert to keep size stable.
 
-> **Note**: The `Pop` benchmark measures a pop followed by a re-insert to keep the dataset size stable across iterations. All numbers are averages across multiple runs.
-
-### Key Observations
-- `Get` performs **zero allocations** on hits.
-- Full iteration over 10,000 elements completes in ~89 µs.
-- The structure is very cache-friendly for sequential iteration.
-
-## Limitations
-
-- **Not thread-safe** — external synchronization is required for concurrent use.
-- `Get` cannot distinguish between a missing key and a key whose value is `nil`/`[]byte{}`.
-- `currMaxLevel` is tracked internally but currently unused (the structure always uses the full configured `MaxLevel`).
-- Designed primarily for in-memory use cases.
+`Get` has zero allocations on hits.
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
-
----
-
-*Contributions and improvements are welcome!*
+MIT

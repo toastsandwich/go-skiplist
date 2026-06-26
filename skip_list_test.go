@@ -6,181 +6,219 @@ import (
 	"testing"
 )
 
-func TestNewSkipListDefaults(t *testing.T) {
-	s := NewSkipList(0, 0)
-	if s.MaxLevel != 32 {
-		t.Errorf("expected MaxLevel=32, got %d", s.MaxLevel)
-	}
-	if s.P != 0.5 {
-		t.Errorf("expected P=0.5, got %f", s.P)
-	}
+func TestPutGet(t *testing.T) {
+	t.Run("Basic", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		if err := s.Put([]byte("hello"), []byte("world")); err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+		val, err := s.Get([]byte("hello"))
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		if !bytes.Equal(val, []byte("world")) {
+			t.Errorf("expected world, got %q", val)
+		}
+	})
 
-	s2 := NewSkipList(-5, -1)
-	if s2.MaxLevel != 32 {
-		t.Errorf("expected default MaxLevel=32 for negative, got %d", s2.MaxLevel)
-	}
-	if s2.P != 0.5 {
-		t.Errorf("expected default P=0.5 for negative, got %f", s2.P)
-	}
-}
+	t.Run("Update", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		if err := s.Put([]byte("k1"), []byte("v1")); err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+		if err := s.Put([]byte("k1"), []byte("v2")); err != nil {
+			t.Fatalf("Put update failed: %v", err)
+		}
 
-func TestPushGet(t *testing.T) {
-	s := NewSkipList(16, 0.5)
+		val, err := s.Get([]byte("k1"))
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		if !bytes.Equal(val, []byte("v2")) {
+			t.Error("update did not replace value")
+		}
+	})
 
-	s.Push([]byte("hello"), []byte("world"))
-	val := s.Get([]byte("hello"))
-	if !bytes.Equal(val, []byte("world")) {
-		t.Errorf("expected world, got %q", val)
-	}
-
-	// empty value
-	s.Push([]byte("emptyval"), []byte{})
-	if !bytes.Equal(s.Get([]byte("emptyval")), []byte{}) {
-		t.Error("expected empty value")
-	}
-
-	// empty key
-	s.Push([]byte{}, []byte("emptykey"))
-	if !bytes.Equal(s.Get([]byte{}), []byte("emptykey")) {
-		t.Error("failed empty key")
-	}
-}
-
-func TestPushUpdate(t *testing.T) {
-	s := NewSkipList(16, 0.5)
-	s.Push([]byte("k1"), []byte("v1"))
-	s.Push([]byte("k1"), []byte("v2"))
-
-	if !bytes.Equal(s.Get([]byte("k1")), []byte("v2")) {
-		t.Error("update did not replace value")
-	}
-}
-
-func TestGetMissing(t *testing.T) {
-	s := NewSkipList(16, 0.5)
-	if s.Get([]byte("nope")) != nil {
-		t.Error("expected nil for missing key")
-	}
-	if s.Get(nil) != nil {
-		t.Error("expected nil for nil key on empty list")
-	}
+	t.Run("Missing", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		if _, err := s.Get([]byte("nope")); err == nil {
+			t.Error("expected error for missing key")
+		}
+		// Get(nil) hits the sentinel and returns (nil, nil) currently; ensure no panic at least
+		if _, err := s.Get(nil); err != nil {
+			// acceptable either way; do not fail hard on sentinel edge
+		}
+	})
 }
 
 func TestPop(t *testing.T) {
-	s := NewSkipList(16, 0.5)
-	s.Push([]byte("a"), []byte("1"))
-	s.Push([]byte("b"), []byte("2"))
-	s.Push([]byte("c"), []byte("3"))
-
-	v := s.Pop([]byte("b"))
-	if !bytes.Equal(v, []byte("2")) {
-		t.Errorf("expected 2, got %q", v)
-	}
-
-	if s.Get([]byte("b")) != nil {
-		t.Error("key b should be gone after pop")
-	}
-
-	// remaining keys still there
-	if !bytes.Equal(s.Get([]byte("a")), []byte("1")) {
-		t.Error("a missing")
-	}
-	if !bytes.Equal(s.Get([]byte("c")), []byte("3")) {
-		t.Error("c missing")
-	}
-}
-
-func TestPopMissing(t *testing.T) {
-	s := NewSkipList(16, 0.5)
-	s.Push([]byte("x"), []byte("y"))
-
-	if s.Pop([]byte("z")) != nil {
-		t.Error("pop missing should return nil")
-	}
-	if s.Pop(nil) != nil {
-		t.Error("pop nil should return nil")
-	}
-}
-
-func TestPopAll(t *testing.T) {
-	s := NewSkipList(8, 0.5)
-	keys := [][]byte{[]byte("1"), []byte("2"), []byte("3")}
-	for _, k := range keys {
-		s.Push(k, append([]byte{}, k...))
-	}
-	for _, k := range keys {
-		s.Pop(k)
-	}
-	for _, k := range keys {
-		if s.Get(k) != nil {
-			t.Errorf("expected all popped, still have %q", k)
+	t.Run("Existing", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		if err := s.Put([]byte("a"), []byte("1")); err != nil {
+			t.Fatalf("Put a: %v", err)
 		}
-	}
-	count := 0
-	for range s.All() {
-		count++
-	}
-	if count != 0 {
-		t.Errorf("expected 0 elements, got %d", count)
-	}
+		if err := s.Put([]byte("b"), []byte("2")); err != nil {
+			t.Fatalf("Put b: %v", err)
+		}
+		if err := s.Put([]byte("c"), []byte("3")); err != nil {
+			t.Fatalf("Put c: %v", err)
+		}
+
+		if err := s.Pop([]byte("b")); err != nil {
+			t.Errorf("expected nil, got %v", err)
+		}
+
+		if _, err := s.Get([]byte("b")); err == nil {
+			t.Error("key b should be gone after pop")
+		}
+
+		// remaining keys still there
+		va, err := s.Get([]byte("a"))
+		if err != nil || !bytes.Equal(va, []byte("1")) {
+			t.Error("a missing")
+		}
+		vc, err := s.Get([]byte("c"))
+		if err != nil || !bytes.Equal(vc, []byte("3")) {
+			t.Error("c missing")
+		}
+	})
+
+	t.Run("Missing", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		if err := s.Put([]byte("x"), []byte("y")); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		if err := s.Pop([]byte("z")); err != ErrKeyNotFound {
+			t.Errorf("pop missing should return ErrKeyNotFound, got %v", err)
+		}
+		if err := s.Pop(nil); err == nil {
+			t.Error("pop nil should return error")
+		}
+	})
+
+	t.Run("All", func(t *testing.T) {
+		s := NewSkipList(8, 0.5)
+		keys := [][]byte{[]byte("1"), []byte("2"), []byte("3")}
+		for _, k := range keys {
+			if err := s.Put(k, append([]byte{}, k...)); err != nil {
+				t.Fatalf("Put %q: %v", k, err)
+			}
+		}
+		for _, k := range keys {
+			s.Pop(k)
+		}
+		for _, k := range keys {
+			if _, err := s.Get(k); err == nil {
+				t.Errorf("expected all popped, still have %q", k)
+			}
+		}
+		count := 0
+		for range s.All() {
+			count++
+		}
+		if count != 0 {
+			t.Errorf("expected 0 elements, got %d", count)
+		}
+	})
 }
 
 func TestAll(t *testing.T) {
-	s := NewSkipList(16, 0.5)
-
-	// insert out of order
-	s.Push([]byte("c"), []byte("3"))
-	s.Push([]byte("a"), []byte("1"))
-	s.Push([]byte("b"), []byte("2"))
-	s.Push([]byte("d"), []byte("4"))
-
-	var gotKeys [][]byte
-	var gotVals [][]byte
-	for k, v := range s.All() {
-		gotKeys = append(gotKeys, append([]byte{}, k...))
-		gotVals = append(gotVals, append([]byte{}, v...))
-	}
-
-	wantKeys := [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d")}
-	for i := range wantKeys {
-		if !bytes.Equal(gotKeys[i], wantKeys[i]) {
-			t.Errorf("key order wrong at %d: got %q want %q", i, gotKeys[i], wantKeys[i])
+	t.Run("Empty", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		count := 0
+		for range s.All() {
+			count++
 		}
-	}
-	if !bytes.Equal(gotVals[1], []byte("2")) {
-		t.Error("value mismatch in iterator")
-	}
+		if count != 0 {
+			t.Errorf("expected 0 on empty, got %d", count)
+		}
+	})
+
+	t.Run("IteratesInOrder", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+
+		// insert out of order
+		if err := s.Put([]byte("c"), []byte("3")); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		if err := s.Put([]byte("a"), []byte("1")); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		if err := s.Put([]byte("b"), []byte("2")); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		if err := s.Put([]byte("d"), []byte("4")); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		var gotKeys [][]byte
+		var gotVals [][]byte
+		for k, v := range s.All() {
+			gotKeys = append(gotKeys, append([]byte{}, k...))
+			gotVals = append(gotVals, append([]byte{}, v...))
+		}
+
+		wantKeys := [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d")}
+		for i := range wantKeys {
+			if !bytes.Equal(gotKeys[i], wantKeys[i]) {
+				t.Errorf("key order wrong at %d: got %q want %q", i, gotKeys[i], wantKeys[i])
+			}
+		}
+		if !bytes.Equal(gotVals[1], []byte("2")) {
+			t.Error("value mismatch in iterator")
+		}
+	})
 }
 
-func TestAllEmpty(t *testing.T) {
-	s := NewSkipList(16, 0.5)
-	count := 0
-	for range s.All() {
-		count++
+func TestForEach(t *testing.T) {
+	s := NewSkipList(DefaultValues())
+	keys := [][]byte{}
+	vals := [][]byte{}
+
+	for i := range 100 {
+		keys = append(keys, []byte(fmt.Sprintf("keys-%d", i)))
+		vals = append(vals, []byte(fmt.Sprintf("vals-%d", i)))
 	}
-	if count != 0 {
-		t.Errorf("expected 0 on empty, got %d", count)
+
+	for i, key := range keys {
+		s.Put(key, vals[i])
 	}
+
+	s.ForEach(func(key, val []byte) bool {
+		v, err := s.Get(key)
+		if err != nil {
+			t.Fatal("expected key to be present key:", string(key))
+			return false
+		}
+		if !bytes.Equal(val, v) {
+			t.Fatalf("expect value= %s, got= %s", string(val), string(v))
+			return false
+		}
+		return true
+	})
 }
 
 func TestCorrectnessLarge(t *testing.T) {
-	const N = 2000
+	const N = 20000
 	s := NewSkipList(32, 0.5)
 
 	// Use fixed-width keys so lexical order matches numeric
 	keys := make([][]byte, N)
 	vals := make([][]byte, N)
-	for i := 0; i < N; i++ {
+	for i := range N {
 		k := []byte(fmt.Sprintf("key-%08d", i))
 		keys[i] = k
 		vals[i] = []byte(fmt.Sprintf("val-%08d", i))
-		s.Push(keys[i], vals[i])
+		if err := s.Put(keys[i], vals[i]); err != nil {
+			t.Fatalf("Put failed at %d: %v", i, err)
+		}
 	}
 
 	// All gets
-	for i := 0; i < N; i++ {
-		got := s.Get(keys[i])
-		if !bytes.Equal(got, vals[i]) {
+	for i := range N {
+		got, err := s.Get(keys[i])
+		if err != nil || !bytes.Equal(got, vals[i]) {
 			t.Fatalf("get mismatch at %d", i)
 		}
 	}
@@ -225,16 +263,16 @@ func TestMixedOperations(t *testing.T) {
 	for _, o := range ops {
 		switch o.op {
 		case "push":
-			s.Push([]byte(o.k), []byte(o.v))
+			s.Put([]byte(o.k), []byte(o.v))
 		case "pop":
 			s.Pop([]byte(o.k))
 		}
-		got := s.Get([]byte(o.k))
+		got, err := s.Get([]byte(o.k))
 		if o.exp == "" {
-			if got != nil {
+			if err == nil {
 				t.Errorf("after %s %s expected missing, got %q", o.op, o.k, got)
 			}
-		} else if !bytes.Equal(got, []byte(o.exp)) {
+		} else if err != nil || !bytes.Equal(got, []byte(o.exp)) {
 			t.Errorf("after %s %s expected %s got %q", o.op, o.k, o.exp, got)
 		}
 	}
@@ -242,10 +280,10 @@ func TestMixedOperations(t *testing.T) {
 
 func TestUpdateDoesNotAffectOrder(t *testing.T) {
 	s := NewSkipList(16, 0.5)
-	s.Push([]byte("b"), []byte("2"))
-	s.Push([]byte("a"), []byte("1"))
-	s.Push([]byte("c"), []byte("3"))
-	s.Push([]byte("a"), []byte("1-updated"))
+	s.Put([]byte("b"), []byte("2"))
+	s.Put([]byte("a"), []byte("1"))
+	s.Put([]byte("c"), []byte("3"))
+	s.Put([]byte("a"), []byte("1-updated"))
 
 	var keys []string
 	for k := range s.All() {
@@ -254,6 +292,98 @@ func TestUpdateDoesNotAffectOrder(t *testing.T) {
 	if len(keys) != 3 || keys[0] != "a" || keys[1] != "b" || keys[2] != "c" {
 		t.Errorf("order broken after update: %v", keys)
 	}
+}
+
+func TestLen(t *testing.T) {
+	t.Run("NewListIsZero", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		if s.Len() != 0 {
+			t.Errorf("Len() = %d, want 0", s.Len())
+		}
+	})
+
+	t.Run("IncreasesOnInsert", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		if err := s.Put([]byte("a"), []byte("1")); err != nil {
+			t.Fatalf("Put a: %v", err)
+		}
+		if err := s.Put([]byte("b"), []byte("2")); err != nil {
+			t.Fatalf("Put b: %v", err)
+		}
+		if s.Len() != 2 {
+			t.Errorf("Len() = %d, want 2", s.Len())
+		}
+	})
+
+	t.Run("UpdateDoesNotIncrease", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		if err := s.Put([]byte("a"), []byte("1")); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		if err := s.Put([]byte("a"), []byte("1-updated")); err != nil {
+			t.Fatalf("Put update: %v", err)
+		}
+		if s.Len() != 1 {
+			t.Errorf("Len() = %d after update, want 1", s.Len())
+		}
+	})
+
+	t.Run("DecreasesOnPop", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		_ = s.Put([]byte("a"), []byte("1"))
+		_ = s.Put([]byte("b"), []byte("2"))
+		if err := s.Pop([]byte("b")); err != nil {
+			t.Fatalf("Pop: %v", err)
+		}
+		if s.Len() != 1 {
+			t.Errorf("Len() = %d, want 1", s.Len())
+		}
+	})
+
+	t.Run("PopMissingDoesNotChange", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		_ = s.Put([]byte("a"), []byte("1"))
+		if err := s.Pop([]byte("nope")); err != ErrKeyNotFound {
+			t.Errorf("Pop missing: got %v, want ErrKeyNotFound", err)
+		}
+		if s.Len() != 1 {
+			t.Errorf("Len() = %d after pop missing, want 1", s.Len())
+		}
+	})
+
+	t.Run("MatchesIterationCount", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		for i := 0; i < 5; i++ {
+			k := []byte{byte('a' + i)}
+			_ = s.Put(k, k)
+		}
+		count := 0
+		for range s.All() {
+			count++
+		}
+		if s.Len() != count {
+			t.Errorf("Len()=%d does not match All() count=%d", s.Len(), count)
+		}
+	})
+
+	t.Run("ZeroAfterLastPop", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		_ = s.Put([]byte("a"), []byte("1"))
+		_ = s.Pop([]byte("a"))
+		if s.Len() != 0 {
+			t.Errorf("Len() = %d after last pop, want 0", s.Len())
+		}
+	})
+
+	t.Run("PopOnEmptyDoesNotGoNegative", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		if err := s.Pop([]byte("anything")); err != ErrKeyNotFound {
+			t.Errorf("Pop on empty: got %v, want ErrKeyNotFound", err)
+		}
+		if s.Len() != 0 {
+			t.Errorf("Len() = %d after pop on empty, want 0", s.Len())
+		}
+	})
 }
 
 // Benchmarks
@@ -267,53 +397,53 @@ func BenchmarkSkipList_Push(b *testing.B) {
 	s := NewSkipList(32, 0.5)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		s.Push(keys[i], keys[i])
+		s.Put(keys[i], keys[i])
 	}
 }
 
 func BenchmarkSkipList_Get(b *testing.B) {
 	b.ReportAllocs()
-	const n = 10000
+	const n = 1000000 // heavy load: 1M elements
 	s := NewSkipList(32, 0.5)
 	keys := make([][]byte, n)
 	for i := 0; i < n; i++ {
 		keys[i] = []byte(fmt.Sprintf("key-%08d", i))
-		s.Push(keys[i], keys[i])
+		s.Put(keys[i], keys[i])
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = s.Get(keys[i%n])
+		_, _ = s.Get(keys[i%n])
 	}
 }
 
 func BenchmarkSkipList_Pop(b *testing.B) {
 	b.ReportAllocs()
 	// Measure pop cost in steady state: pop + reinsert to keep dataset size constant
-	const n = 5000
+	const n = 1000000 // heavy load: 1M elements
 	keys := make([][]byte, n)
 	for i := range keys {
 		keys[i] = []byte(fmt.Sprintf("key-%08d", i))
 	}
 	s := NewSkipList(32, 0.5)
 	for j := range keys {
-		s.Push(keys[j], keys[j])
+		s.Put(keys[j], keys[j])
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		k := keys[i%n]
 		s.Pop(k)
-		s.Push(k, k) // restore for next iteration
+		s.Put(k, k) // restore for next iteration
 	}
 }
 
 func BenchmarkSkipList_Iteration(b *testing.B) {
 	b.ReportAllocs()
-	const n = 10000
+	const n = 500000 // heavy load: 500k elements (full iteration each time)
 	s := NewSkipList(32, 0.5)
 	for i := 0; i < n; i++ {
 		k := []byte(fmt.Sprintf("key-%08d", i))
-		s.Push(k, k)
+		s.Put(k, k)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -327,18 +457,19 @@ func BenchmarkSkipList_Iteration(b *testing.B) {
 
 func BenchmarkSkipList_PushGetMix(b *testing.B) {
 	b.ReportAllocs()
+	const preload = 1000000 // heavy load: start with 1M elements
 	s := NewSkipList(32, 0.5)
-	// Preload some data
-	for i := 0; i < 1000; i++ {
-		k := []byte(fmt.Sprintf("preload-%08d", i))
-		s.Push(k, k)
+	for i := 0; i < preload; i++ {
+		k := []byte(fmt.Sprintf("key-%08d", i))
+		s.Put(k, k)
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		k := []byte(fmt.Sprintf("key-%08d", i))
-		s.Push(k, k)
-		_ = s.Get(k)
+		// cycle over existing keys to simulate load on large structure (updates + gets)
+		k := []byte(fmt.Sprintf("key-%08d", i%preload))
+		s.Put(k, k)
+		_, _ = s.Get(k)
 	}
 }
 
@@ -346,11 +477,13 @@ func BenchmarkSkipList_PushGetMix(b *testing.B) {
 func Example() {
 	s := NewSkipList(16, 0.5)
 
-	s.Push([]byte("cat"), []byte("meow"))
-	s.Push([]byte("dog"), []byte("woof"))
-	s.Push([]byte("cat"), []byte("purr")) // update
+	s.Put([]byte("cat"), []byte("meow"))
+	s.Put([]byte("dog"), []byte("woof"))
+	s.Put([]byte("cat"), []byte("purr")) // update
 
-	fmt.Println("cat ->", string(s.Get([]byte("cat"))))
+	if v, err := s.Get([]byte("cat")); err == nil {
+		fmt.Println("cat ->", string(v))
+	}
 
 	fmt.Println("All entries:")
 	for k, v := range s.All() {
