@@ -1,28 +1,13 @@
-// Package skiplist implements a probabilistic skip list, a sorted key-value
-// store with expected O(log n) search, insert, and delete performance.
+// Package skiplist is a sorted []byte key/value store.
 //
-// Skip lists maintain multiple levels of linked lists. Lower levels contain
-// all elements; higher levels contain fewer elements and serve as shortcuts
-// during search. The height of each inserted element is chosen randomly
-// using a geometric distribution controlled by the probability parameter P.
+// Put, Get, and Pop are O(log n) on average. Keys sort with bytes.Compare.
+// Not safe for concurrent use.
 //
-// Keys ([]byte) are ordered using [bytes.Compare]. Values are also []byte.
-//
-// The implementation is not concurrent-safe.
-//
-// Example:
-//
-//	s := NewSkipList(32, 0.5)
-//	s.Push([]byte("alpha"), []byte("first"))
-//	s.Push([]byte("beta"), []byte("second"))
-//
-//	v := s.Get([]byte("alpha")) // []byte("first")
-//
-//	for k, v := range s.All() {
-//	    // iterates in sorted key order
-//	}
-//
-//	s.Pop([]byte("beta"))
+//	s := NewSkipList(0, 0) // defaults: max level 32, p 0.5
+//	s.Put([]byte("a"), []byte("1"))
+//	v, _ := s.Get([]byte("a"))
+//	s.Pop([]byte("a"))
+//	for k, v := range s.All() { _ = k; _ = v }
 package skiplist
 
 import (
@@ -35,26 +20,21 @@ import (
 )
 
 var (
-	ErrNilKey      = errors.New("key cannot be nil or zero len slice of byte")
-	ErrNilVal      = errors.New("value cannot be nil or zero len slice of byte")
-	ErrKeyNotFound = errors.New("key not found")
+	ErrNilKey        = errors.New("key cannot be nil or zero len slice of byte")
+	ErrNilVal        = errors.New("value cannot be nil or zero len slice of byte")
+	ErrKeyNotFound   = errors.New("key not found")
+	ErrSkiplistFull  = errors.New("skip list is full")
 )
 
-// Return default values for maxlevel and p
+// DefaultValues returns the default max level (32) and probability (0.5).
 func DefaultValues() (int, float64) {
 	return 32, 0.5
 }
 
-// Element represents one node in the skip list containing a key/value pair.
-//
-// Level indicates the highest level (0-based) at which this element appears.
-// Elements at level L are also linked into all levels 0 through L.
+// Element is one node in the list. Most callers use Put instead.
 type Element struct {
-	// Key and Value hold the stored data. Keys are compared with bytes.Compare.
 	Key, Value []byte
-
-	// Level is the highest level this element participates in.
-	Level int
+	Level      int
 
 	// Unexported forward pointers for each level.
 	nexts    []*Element
@@ -79,16 +59,12 @@ func makeHeaderElement(max int) *Element {
 // end of the skiplist, it does not have any next elements
 var nilElement = &Element{}
 
-// SetLevel sets the Level of the element. It does not adjust any links.
+// SetLevel sets the node height. Does not update links.
 func (e *Element) SetLevel(l int) {
 	e.Level = l
 }
 
-// NewElement creates a new Element with the provided key, value and level.
-// The created element will have forward pointers allocated up to s.MaxLevel.
-//
-// This is primarily intended for advanced use cases. Most callers should use
-// [SkipList.Push] instead.
+// NewElement builds a node with level l. Use Put for normal inserts.
 func (s *SkipList) NewElement(key, val []byte, l int) *Element {
 	return &Element{
 		Key:   key,
@@ -98,24 +74,14 @@ func (s *SkipList) NewElement(key, val []byte, l int) *Element {
 	}
 }
 
-// SkipList is a sorted collection of []byte key/value pairs implemented as
-// a probabilistic skip list.
-//
-// Header is a sentinel node. Its nexts slice contains the head pointers for
-// each level of the skip list.
-//
-// MaxLevel is the maximum number of levels in the skip list.
-//
-// P is the probability used when choosing random level for new elements
-// (see [NewSkipList]).
+// SkipList stores sorted []byte key/value pairs.
 type SkipList struct {
-	// Header is the entry point for searches at every level.
-	Header *Element
-
+	Header   *Element
 	MaxLevel int
+	P        float64
 
-	// P controls the probability of promoting an element to a higher level.
-	P float64
+	// MaxLen is the max number of entries. 0 means unlimited.
+	MaxLen int
 
 	nilElement *Element
 	len        int
@@ -123,16 +89,7 @@ type SkipList struct {
 	pool sync.Pool
 }
 
-// NewSkipList creates and returns a new SkipList.
-//
-// maxlevel is the maximum height of the skip list. If <= 0, it defaults to 32.
-//
-// p is the probability that an inserted element will be promoted to the next
-// higher level (geometric distribution). The classic value is 0.5. If p <= 0,
-// it defaults to 0.5.
-//
-// Higher p values produce taller structures on average; lower values produce
-// flatter ones. 0.5 is generally a good balance.
+// NewSkipList creates a list. Pass 0 for either arg to use defaults (32, 0.5).
 func NewSkipList(maxlevel int, p float64) *SkipList {
 	if maxlevel <= 0 {
 		maxlevel = 32
@@ -153,11 +110,7 @@ func NewSkipList(maxlevel int, p float64) *SkipList {
 	}
 }
 
-// Get returns the value associated with key.
-//
-// It returns nil if the key does not exist in the skip list.
-// Note: because values are []byte, it is not possible to distinguish
-// between a missing key and a key whose value is nil or empty using Get alone.
+// Get returns the value for key. ErrKeyNotFound if missing, ErrNilKey if empty.
 func (s *SkipList) Get(key []byte) ([]byte, error) {
 	if len(key) == 0 {
 		return nil, ErrNilKey
@@ -185,10 +138,8 @@ func validateKeyValue(key []byte, value []byte) error {
 	return nil
 }
 
-// Put inserts the key/value pair into the skip list.
-// If the key already exists, its value is overwritten.
-//
-// Elements are maintained in ascending order by key using bytes.Compare.
+// Put inserts or updates a key/value pair.
+// ErrNilKey or ErrNilVal on empty input. ErrSkiplistFull if MaxLen is reached.
 func (s *SkipList) Put(key, val []byte) error {
 	if err := validateKeyValue(key, val); err != nil {
 		return err
@@ -210,6 +161,9 @@ func (s *SkipList) Put(key, val []byte) error {
 		x.Value = val
 		return nil
 	}
+	if s.MaxLen > 0 && s.len >= s.MaxLen {
+		return ErrSkiplistFull
+	}
 	lvl := s.randomLevel()
 	x = s.NewElement(key, val, lvl)
 	for i := 0; i <= lvl; i++ {
@@ -220,8 +174,7 @@ func (s *SkipList) Put(key, val []byte) error {
 	return nil
 }
 
-// Pop removes the element with the given key and returns its previous value.
-// If the key does not exist, Pop returns nil and leaves the list unchanged.
+// Pop removes key. ErrKeyNotFound if missing, ErrNilKey if empty.
 func (s *SkipList) Pop(key []byte) error {
 	if len(key) == 0 {
 		return ErrNilKey
@@ -254,17 +207,7 @@ func (s *SkipList) Pop(key []byte) error {
 	return nil
 }
 
-// All returns an iterator that yields all key/value pairs in ascending
-// key order.
-//
-// It satisfies the iter.Seq2 interface and can be used directly with range:
-//
-//	for key, value := range list.All() {
-//	    ...
-//	}
-//
-// The iterator is valid only for the current state of the list. Modifying
-// the list during iteration may produce unexpected results.
+// All iterates key/value pairs in sorted order. Don't modify the list while ranging.
 func (s *SkipList) All() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		for i := s.Header.nexts[0]; i != s.nilElement; i = i.nexts[0] {
@@ -275,6 +218,7 @@ func (s *SkipList) All() iter.Seq2[[]byte, []byte] {
 	}
 }
 
+// ForEach walks all pairs in sorted order. Return false from do to stop early.
 func (s *SkipList) ForEach(do func(key, value []byte) bool) {
 	for i := s.Header.nexts[0]; i != s.nilElement; i = i.nexts[0] {
 		if !do(i.Key, i.Value) {
@@ -283,7 +227,7 @@ func (s *SkipList) ForEach(do func(key, value []byte) bool) {
 	}
 }
 
-// Returns number of elements in a list
+// Len returns the number of entries.
 func (s *SkipList) Len() int {
 	return s.len
 }

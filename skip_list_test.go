@@ -294,6 +294,31 @@ func TestUpdateDoesNotAffectOrder(t *testing.T) {
 	}
 }
 
+func TestMaxLen(t *testing.T) {
+	s := NewSkipList(16, 0.5)
+	s.MaxLen = 2
+
+	if err := s.Put([]byte("a"), []byte("1")); err != nil {
+		t.Fatalf("Put a: %v", err)
+	}
+	if err := s.Put([]byte("b"), []byte("2")); err != nil {
+		t.Fatalf("Put b: %v", err)
+	}
+	if err := s.Put([]byte("c"), []byte("3")); err != ErrSkiplistFull {
+		t.Fatalf("Put c: got %v, want ErrSkiplistFull", err)
+	}
+	if s.Len() != 2 {
+		t.Errorf("Len() = %d, want 2", s.Len())
+	}
+
+	if err := s.Put([]byte("a"), []byte("1-updated")); err != nil {
+		t.Fatalf("Put update when full: %v", err)
+	}
+	if v, err := s.Get([]byte("a")); err != nil || string(v) != "1-updated" {
+		t.Errorf("Get after update when full: val=%q err=%v", v, err)
+	}
+}
+
 func TestLen(t *testing.T) {
 	t.Run("NewListIsZero", func(t *testing.T) {
 		s := NewSkipList(16, 0.5)
