@@ -299,6 +299,16 @@ func (s *SkipList) Pop(key []byte) error {
 	return nil
 }
 
+// Reset the skiplist
+func (s *SkipList) Reset() {
+	h := s.Header
+	for l := s.topLevel(0); l >= 0; l-- {
+		h.nexts[l] = s.nilElement
+	}
+	s.level = -1
+	s.len = 0
+}
+
 // All iterates key/value pairs in sorted order. Don't modify the list while ranging.
 func (s *SkipList) All() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
