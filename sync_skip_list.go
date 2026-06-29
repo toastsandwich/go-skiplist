@@ -201,6 +201,25 @@ func (s *SyncSkipList) Pop(key []byte) error {
 	return nil
 }
 
+// Reset the skiplist
+func (s *SyncSkipList) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for e := s.Header.nexts[0]; e != s.nilElement; {
+		next := e.nexts[0]
+		s.elementPool.Put(e.Reset())
+		e = next
+	}
+
+	for l := range s.MaxLevel {
+		s.Header.nexts[l] = s.nilElement
+	}
+
+	s.level = -1
+	s.len.Store(0)
+}
+
 // Len returns the number of entries.
 func (s *SyncSkipList) Len() int64 {
 	return s.len.Load()

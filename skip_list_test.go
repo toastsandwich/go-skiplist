@@ -450,6 +450,97 @@ func TestLen(t *testing.T) {
 	})
 }
 
+func TestSkipList_Reset(t *testing.T) {
+	t.Run("Empty", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		s.Reset()
+		if s.Len() != 0 {
+			t.Errorf("Len() = %d after reset, want 0", s.Len())
+		}
+		if s.level != -1 {
+			t.Errorf("level = %d after reset, want -1", s.level)
+		}
+		count := 0
+		for range s.All() {
+			count++
+		}
+		if count != 0 {
+			t.Errorf("All() yielded %d items, want 0", count)
+		}
+	})
+
+	t.Run("AfterInserts", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		for _, kv := range [][2]string{{"a", "1"}, {"b", "2"}, {"c", "3"}} {
+			if err := s.Put([]byte(kv[0]), []byte(kv[1])); err != nil {
+				t.Fatalf("Put %s: %v", kv[0], err)
+			}
+		}
+		s.Reset()
+		if s.Len() != 0 {
+			t.Errorf("Len() = %d after reset, want 0", s.Len())
+		}
+		if s.level != -1 {
+			t.Errorf("level = %d after reset, want -1", s.level)
+		}
+		for _, k := range []string{"a", "b", "c"} {
+			if _, err := s.Get([]byte(k)); err != ErrKeyNotFound {
+				t.Errorf("Get(%q) = %v, want ErrKeyNotFound", k, err)
+			}
+		}
+	})
+
+	t.Run("Reusable", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		for i := 0; i < 100; i++ {
+			k := []byte(fmt.Sprintf("key-%03d", i))
+			if err := s.Put(k, k); err != nil {
+				t.Fatalf("Put %d: %v", i, err)
+			}
+		}
+		s.Reset()
+
+		for i := 0; i < 100; i++ {
+			k := []byte(fmt.Sprintf("key-%03d", i))
+			if err := s.Put(k, k); err != nil {
+				t.Fatalf("re-Put %d: %v", i, err)
+			}
+		}
+		if s.Len() != 100 {
+			t.Errorf("Len() = %d after re-insert, want 100", s.Len())
+		}
+		for i := 0; i < 100; i++ {
+			k := []byte(fmt.Sprintf("key-%03d", i))
+			got, err := s.Get(k)
+			if err != nil || !bytes.Equal(got, k) {
+				t.Errorf("re-Get %q: got %q err=%v", k, got, err)
+			}
+		}
+	})
+
+	t.Run("LargeThenReset", func(t *testing.T) {
+		const N = 10000
+		s := NewSkipList(32, 0.5)
+		for i := 0; i < N; i++ {
+			k := []byte(fmt.Sprintf("key-%08d", i))
+			if err := s.Put(k, k); err != nil {
+				t.Fatalf("Put %d: %v", i, err)
+			}
+		}
+		s.Reset()
+		if s.Len() != 0 {
+			t.Errorf("Len() = %d after large reset, want 0", s.Len())
+		}
+		count := 0
+		for range s.All() {
+			count++
+		}
+		if count != 0 {
+			t.Errorf("All() yielded %d items after large reset, want 0", count)
+		}
+	})
+}
+
 func TestActiveLevel(t *testing.T) {
 	t.Run("EmptyIsNegativeOne", func(t *testing.T) {
 		s := NewSkipList(16, 0.5)
